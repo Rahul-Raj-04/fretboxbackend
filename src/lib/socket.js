@@ -7,7 +7,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ["https://fretbox.brandbell.in"],
+    origin: ["https://fretbox.brandbell.in", "http://localhost:5173"],
   },
 });
 
