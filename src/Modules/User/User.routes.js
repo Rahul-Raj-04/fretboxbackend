@@ -12,7 +12,7 @@ import {
   updateUser,
 } from "./User.controler.js";
 
-import { protectRoute } from "../../middleware/auth.middleware.js";
+import { protectRoute } from "../../Middleware/auth.middleware.js";
 
 const router = express.Router();
 
