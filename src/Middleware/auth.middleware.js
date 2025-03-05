@@ -4,7 +4,13 @@ import { User } from "../Modules/User/User.model.js"
 export const protectRoute = async (req, res, next) => {
   try {
     console.log("Cookies in request:", req.cookies); // Debugging
-    const token = req.cookies.jwt;
+    console.log("Headers in request:", req.headers); // Debugging
+    let token = req.cookies.jwt;
+
+    // ✅ Agar Cookies me na mile to Headers me dekho
+    if (!token && req.headers.authorization?.startsWith("Bearer ")) {
+      token = req.headers.authorization.split(" ")[1];
+    }
 
     if (!token) {
       return res.status(401).json({ message: "Unauthorized - No Token Provided" });
