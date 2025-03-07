@@ -9,7 +9,6 @@ const messageSchema = new mongoose.Schema(
     },
     receiverId: {
       type: mongoose.Schema.Types.ObjectId,
-
       required: true,
     },
     text: {
@@ -22,9 +21,25 @@ const messageSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    status: {
+      type: String,
+      enum: ["sent", "delivered", "seen"],
+      default: "sent",
+    },
     poll: {
       question: String,
-      options: [{ text: String, votes: Number }],
+      options: [
+        {
+          text: String,
+          votes: Number,
+          votedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+        }
+      ],
+    },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message", // Reference to the original message
+      default: null,
     },
   },
   { timestamps: true }

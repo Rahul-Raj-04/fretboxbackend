@@ -33,7 +33,9 @@ export const getMessages = async (req, res) => {
     let messages;
     if (chat && chat.isGroup) {
       // If it's a group, get all messages where receiverId is the group chat ID
-      messages = await Message.find({ receiverId: chatOrUserId }).sort({ createdAt: 1 });
+      messages = await Message.find({ receiverId: chatOrUserId }).sort({
+        createdAt: 1,
+      });
     } else {
       // If it's a private chat, find messages between sender and receiver
       messages = await Message.find({
@@ -53,7 +55,7 @@ export const getMessages = async (req, res) => {
 
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text, replyTo } = req.body;
     const { id: receiverId } = req.params; // Can be User ID or Chat ID
     const senderId = req.user._id;
 
@@ -68,13 +70,12 @@ export const sendMessage = async (req, res) => {
     let imageUrl = null;
     if (req.file) {
       const uploadResponse = await new Promise((resolve, reject) => {
-        cloudinary.uploader.upload_stream(
-          { resource_type: "image" },
-          (error, result) => {
+        cloudinary.uploader
+          .upload_stream({ resource_type: "image" }, (error, result) => {
             if (error) return reject(error);
             resolve(result.secure_url);
-          }
-        ).end(req.file.buffer);
+          })
+          .end(req.file.buffer);
       });
 
       imageUrl = uploadResponse;
@@ -86,9 +87,15 @@ export const sendMessage = async (req, res) => {
       receiverId, // Can be User ID (private) or Chat ID (group)
       text,
       image: imageUrl,
+      replyTo: replyTo || null,
+      status: "sent",
     });
 
     await newMessage.save();
+
+    if (replyTo) {
+      await newMessage.populate("replyTo");
+    }
 
     if (isGroupChat) {
       // Notify all group members except sender
@@ -105,6 +112,12 @@ export const sendMessage = async (req, res) => {
       const receiverSocketId = getReceiverSocketId(receiverId);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit("newMessage", newMessage);
+        newMessage.status = "delivered";
+        await newMessage.save();
+        io.to(receiverSocketId).emit("messageStatusUpdate", {
+          messageId: newMessage._id,
+          status: "delivered",
+        });
       }
     }
 
@@ -224,9 +237,7 @@ export const deleteMessage = async (req, res) => {
 
     // Check if the user is the sender of the message
     if (message.senderId.toString() !== userId.toString()) {
-      return res
-        .status(403)
-        .json({ error: "You cant delete this   message" });
+      return res.status(403).json({ error: "You cant delete this   message" });
     }
 
     // Delete the message
@@ -244,3 +255,71 @@ export const deleteMessage = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
+
+export const voteOnPoll = async (req, res) => {
+  try {
+    const { messageId, optionIndex } = req.body;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message || !message.poll) {
+      return res.status(404).json({ error: "Poll not found." });
+    }
+
+    if (optionIndex < 0 || optionIndex >= message.poll.options.length) {
+      return res.status(400).json({ error: "Invalid option index." });
+    }
+
+    let previousOptionIndex = -1;
+
+    // ✅ Pehle vote check karna
+    message.poll.options.forEach((option, index) => {
+      if (option.votedBy.includes(userId)) {
+        previousOptionIndex = index;
+      }
+    });
+
+    // ✅ Pehle ka vote remove karna
+    if (previousOptionIndex !== -1) {
+      message.poll.options[previousOptionIndex].votes -= 1;
+      message.poll.options[previousOptionIndex].votedBy =
+        message.poll.options[previousOptionIndex].votedBy.filter(
+          (id) => id.toString() !== userId.toString()
+        );
+    }
+
+    // ✅ Naye option pe vote increment karein
+    message.poll.options[optionIndex].votes += 1;
+    message.poll.options[optionIndex].votedBy.push(userId);
+
+    await message.save();
+
+    // ✅ Sender aur Receiver dono ke liye real-time update bhejna
+    const senderSocketId = getReceiverSocketId(message.senderId); // Sender ka socket
+    const receiverSocketId = getReceiverSocketId(message.receiverId); // Receiver ka socket
+
+    console.log(`Sending poll update to: Sender(${senderSocketId}), Receiver(${receiverSocketId})`);
+
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("pollUpdated", {
+        messageId,
+        poll: message.poll,
+      });
+    }
+
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("pollUpdated", {
+        messageId,
+        poll: message.poll,
+      });
+    }
+
+    res.status(200).json({ message: "Vote updated", poll: message.poll });
+  } catch (error) {
+    console.log("Error in voteOnPoll controller:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+
+
